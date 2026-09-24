@@ -61,6 +61,9 @@ function App() {
   useEffect(() => { localStorage.setItem('pour-products', JSON.stringify(products)) }, [products])
   useEffect(() => { localStorage.setItem('pour-mode', mode) }, [mode])
   useEffect(() => {
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {})
+  }, [])
+  useEffect(() => {
     const handleKeyDown = (event) => {
       const isShortcut = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k'
       if (isShortcut) {
