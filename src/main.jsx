@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import './styles.light.css'
 
-const catalogVersion = 'decorch-enterprise-full-menu-v3'
+const catalogVersion = 'decorch-enterprise-full-menu-v4'
 const wholesaleStocks = [
   ['SACHET-AQUA FRESH', 10], ['SACHETS- COOL', 12], ['SACHETS- MOBILE', 12], ['SACHETS- EVERPURE', 15], ['SACHETS- STANDARD', 12],
   ['VERNA', 32], ['SLIMFIT', 28], ['BEL-ACTIVE', 55], ['PERLA WATER (S)', 34], ['PERLA WATER (M)', 34], ['AWAKE-SMALL', 30], ['AWAKE MEDIUM', 38],
@@ -29,36 +29,117 @@ const fridgeRetailItems = [
   ['BLUE JEANS ENERGY', 20], ['VODY ENERGY', 20], ['RED BULL ENERGY', 25], ['KISS/SMIRNOFF(SMALL)', 20], ['KISS (BIG)', 25], ['FRUIT-TELI', 30],
   ['VITAMIK (BIG)', 30], ['BIG FANTA/SPIRIT/ COKE', 25], ['HOLLANDIA-BIG', 35], ['DON SIMON-BIG', 35], ['WELCH', 45], ['CERES', 45], ['PILLOW', 75],
 ]
+const productPairAliases = {
+  sachetaquafresh: 'sachetwaterfresh',
+  sachetacquafresh: 'sachetwaterfresh',
+  sacheteverpure: 'sacheteverpure',
+  sachetseverpure: 'sacheteverpure',
+  hollandiakalyppost: 'hollandiakalyppo',
+  rushstormssmall: 'stormrush',
+  rushstorms: 'stormrush',
+  stormrush5star: 'stormrush',
+  tampico: 'tampicosmall',
+  darlinglemon: 'darling',
+  kalypohappydelig: 'kalyppo',
+  kalyppo: 'kalyppo',
+  plasticcokefanta: 'plasticcokesmall',
+  plasticcokes: 'plasticcokesmall',
+  bigfantaspiritcoke: 'plasticcokebig',
+  plasticcokebig: 'plasticcokebig',
+  cancokefanta: 'cancokesmall',
+  cancokesmall: 'cancokesmall',
+  canmalt: 'canmaltsmall',
+  platicmalt: 'plasticmalt',
+  plasticmalt: 'plasticmalt',
+}
+const normalizeProductName = (name) => String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+const getProductPairKey = (name) => {
+  const normalized = normalizeProductName(name)
+  return productPairAliases[normalized] || normalized
+}
+const getRetailUnitLabel = (name) => {
+  const normalized = normalizeProductName(name)
+  if (normalized.includes('sachet')) return 'Single sachet'
+  if (normalized.includes('iceblock')) return 'Single ice block'
+  if (normalized.includes('can')) return 'Single can'
+  if (normalized.includes('bottle') || normalized.includes('water') || normalized.includes('plastic')) return 'Single bottle'
+  return 'Single item'
+}
+const getWholesaleUnitLabel = (variant = {}) => {
+  const label = variant.wholesaleUnitLabel || 'Carton / box'
+  const quantity = Math.max(1, Number(variant.packQuantity) || 1)
+  return `${label} · ${quantity} ${quantity === 1 ? 'unit' : 'units'}`
+}
 const buildProducts = (items, category) => items.map(([name, price], index) => ({
   id: `${category === 'Wholesale Stocks' ? 'w' : 'r'}${index + 1}`,
   name,
   category,
   pricingScope: category === 'Wholesale Stocks' ? 'wholesale' : 'retail',
+  pairKey: getProductPairKey(name),
   description: category === 'Wholesale Stocks' ? 'DECORCH ENTERPRISE · wholesale stock' : 'DECORCH ENTERPRISE · fridge retail',
   accent: ['cyan', 'green', 'amber', 'orange', 'pink'][index % 5],
   variants: (Array.isArray(price) ? price : [price]).map((variantPrice, variantIndex) => ({
     id: `v-${category[0].toLowerCase()}${index + 1}-${variantIndex + 1}`,
-    sizeLabel: Array.isArray(price) ? ['1.0L', '1.5L'][variantIndex] : category === 'Wholesale Stocks' ? 'Wholesale stock' : 'Fridge retail',
+    sizeLabel: Array.isArray(price) ? ['1.0L', '1.5L'][variantIndex] : 'Standard',
     retailPrice: category === 'Fridge Retail' ? variantPrice : null,
     wholesalePrice: category === 'Wholesale Stocks' ? variantPrice : null,
+    retailUnitLabel: category === 'Fridge Retail' ? getRetailUnitLabel(name) : null,
+    wholesaleUnitLabel: category === 'Wholesale Stocks' ? 'Carton / box' : null,
     packQuantity: 1,
   })),
 }))
-const seedProducts = [...buildProducts(wholesaleStocks, 'Wholesale Stocks'), ...buildProducts(fridgeRetailItems, 'Fridge Retail')]
-const seedProductsById = new Map(seedProducts.map((product) => [product.id, product]))
+const rawSeedProducts = [...buildProducts(wholesaleStocks, 'Wholesale Stocks'), ...buildProducts(fridgeRetailItems, 'Fridge Retail')]
+const seedProductsById = new Map(rawSeedProducts.map((product) => [product.id, product]))
+const mergeSeedProducts = (products) => {
+  const merged = []
+  products.forEach((product) => {
+    const seed = seedProductsById.get(product.id)
+    const entry = {
+      ...product,
+      pairKey: product.pairKey || seed?.pairKey || null,
+      categories: Array.isArray(product.categories) ? product.categories : [product.category],
+    }
+    if (!seed || !entry.pairKey || !['retail', 'wholesale'].includes(entry.pricingScope)) {
+      merged.push(entry)
+      return
+    }
+    const partnerIndex = merged.findIndex((item) => seedProductsById.has(item.id) && item.pairKey === entry.pairKey && item.pricingScope !== entry.pricingScope && item.pricingScope !== 'both' && item.variants.length === entry.variants.length)
+    if (partnerIndex < 0) {
+      merged.push(entry)
+      return
+    }
+    const partner = merged[partnerIndex]
+    const retailProduct = entry.pricingScope === 'retail' ? entry : partner
+    const wholesaleProduct = entry.pricingScope === 'wholesale' ? entry : partner
+    const variants = retailProduct.variants.map((retailVariant, index) => {
+      const wholesaleVariant = wholesaleProduct.variants[index]
+      return {
+        ...retailVariant,
+        retailPrice: retailVariant.retailPrice,
+        wholesalePrice: wholesaleVariant.wholesalePrice,
+        retailUnitLabel: retailVariant.retailUnitLabel || getRetailUnitLabel(retailProduct.name),
+        wholesaleUnitLabel: wholesaleVariant.wholesaleUnitLabel || 'Carton / box',
+        packQuantity: wholesaleVariant.packQuantity || 1,
+      }
+    })
+    merged[partnerIndex] = {
+      ...retailProduct,
+      id: partner.id,
+      pricingScope: 'both',
+      categories: [...new Set([...retailProduct.categories, ...wholesaleProduct.categories])],
+      description: 'DECORCH ENTERPRISE · fridge retail and wholesale stock',
+      variants,
+    }
+  })
+  return merged
+}
+const seedProducts = mergeSeedProducts(rawSeedProducts)
 
 const icons = { Coffee, Soda: GlassWater, Juice: Wine, 'Craft Beer': Beer, Shakes: IceCreamBowl, Water: GlassWater }
 const uid = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 const hasPrice = (value) => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value))
 const money = (value) => hasPrice(value) ? `GH₵${Number(value).toFixed(2)}` : '—'
 const validPricingScope = (scope) => ['retail', 'wholesale', 'both'].includes(scope)
-const getVariantPrices = (variant, scope) => {
-  const pricingScope = validPricingScope(scope) ? scope : 'both'
-  return [
-    { key: 'retailPrice', label: 'Retail', supported: pricingScope !== 'wholesale' },
-    { key: 'wholesalePrice', label: 'Wholesale stock', supported: pricingScope !== 'retail' },
-  ].filter((price) => price.supported && hasPrice(variant?.[price.key]))
-}
 const inferPricingScope = (product) => {
   const variants = Array.isArray(product.variants) ? product.variants : []
   const hasRetail = variants.some((variant) => hasPrice(variant?.retailPrice))
@@ -81,8 +162,28 @@ const migrateProducts = (stored) => stored
       const wasDuplicatedSeedPrice = hasPrice(sourcePrice) && Number(variant[sourcePriceKey]) === sourcePrice && Number(variant[unusedPriceKey]) === sourcePrice
       return wasDuplicatedSeedPrice ? { ...variant, [unusedPriceKey]: null } : variant
     })
-    return { ...product, pricingScope: validPricingScope(product.pricingScope) ? product.pricingScope : seed?.pricingScope || inferPricingScope(product), variants }
+    return {
+      ...product,
+      pairKey: product.pairKey || seed?.pairKey || null,
+      categories: Array.isArray(product.categories) ? product.categories : [product.category],
+      pricingScope: validPricingScope(product.pricingScope) ? product.pricingScope : seed?.pricingScope || inferPricingScope(product),
+      variants: variants.map((variant) => ({
+        ...variant,
+        retailUnitLabel: variant.retailUnitLabel || seed?.variants.find((item) => item.id === variant?.id)?.retailUnitLabel || getRetailUnitLabel(product.name),
+        wholesaleUnitLabel: variant.wholesaleUnitLabel || seed?.variants.find((item) => item.id === variant?.id)?.wholesaleUnitLabel || 'Carton / box',
+        packQuantity: Number(variant.packQuantity) || 1,
+      })),
+    }
   })
+const tierPriceKey = (priceTier) => priceTier === 'Retail' ? 'retailPrice' : 'wholesalePrice'
+const categoryForTier = (priceTier) => priceTier === 'Retail' ? 'Fridge Retail' : 'Wholesale Stocks'
+const productHasTier = (product, priceTier) => {
+  const scope = validPricingScope(product.pricingScope) ? product.pricingScope : inferPricingScope(product)
+  return scope === 'both' || scope === priceTier.toLowerCase()
+}
+const tierUnitLabel = (product, variant, priceTier) => priceTier === 'Retail'
+  ? variant.retailUnitLabel || getRetailUnitLabel(product.name)
+  : getWholesaleUnitLabel(variant)
 const loadProducts = () => {
   try {
     const needsMigration = localStorage.getItem('pour-catalog-version') !== catalogVersion
@@ -102,6 +203,7 @@ function App() {
   const [mode, setMode] = useState(() => localStorage.getItem('pour-mode') || 'Display')
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState('All')
+  const [priceTier, setPriceTier] = useState(() => localStorage.getItem('pour-price-tier') === 'Wholesale' ? 'Wholesale' : 'Retail')
   const [menuOpen, setMenuOpen] = useState(false)
   const [modal, setModal] = useState(null)
   const [editingProduct, setEditingProduct] = useState(null)
@@ -109,6 +211,7 @@ function App() {
 
   useEffect(() => { localStorage.setItem('pour-products', JSON.stringify(products)) }, [products])
   useEffect(() => { localStorage.setItem('pour-mode', mode) }, [mode])
+  useEffect(() => { localStorage.setItem('pour-price-tier', priceTier) }, [priceTier])
   useEffect(() => {
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {})
   }, [])
@@ -130,8 +233,12 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
 
-  const visibleProducts = useMemo(() => mode === 'Admin' ? products : products.filter((product) => Array.isArray(product.variants) && product.variants.some((variant) => getVariantPrices(variant, product.pricingScope).length)), [products, mode])
-  const categories = useMemo(() => ['All', ...new Set(visibleProducts.map((p) => p.category))], [visibleProducts])
+  const visibleProducts = useMemo(() => products.filter((product) => productHasTier(product, priceTier) && (mode === 'Admin' || Array.isArray(product.variants) && product.variants.some((variant) => hasPrice(variant[tierPriceKey(priceTier)])))), [products, mode, priceTier])
+  const categories = useMemo(() => {
+    const available = new Set(visibleProducts.flatMap((product) => product.categories?.length ? product.categories : [product.category]))
+    const listCategories = ['Fridge Retail', 'Wholesale Stocks'].filter((item) => available.has(item))
+    return ['All', ...listCategories, ...[...available].filter((item) => !listCategories.includes(item))]
+  }, [visibleProducts])
   useEffect(() => {
     if (category !== 'All' && !categories.includes(category)) setCategory('All')
   }, [category, categories])
@@ -139,13 +246,14 @@ function App() {
     const term = search.toLowerCase().trim()
     const variants = Array.isArray(product.variants) ? product.variants : []
     const matchesSearch = !term || [product.name, product.category, product.description, ...variants.map((v) => v.sizeLabel)].join(' ').toLowerCase().includes(term)
-    return matchesSearch && (category === 'All' || product.category === category)
+    return matchesSearch && (category === 'All' || (product.categories?.length ? product.categories : [product.category]).includes(category))
   }), [visibleProducts, search, category])
 
   const quickLookup = search.trim() ? filtered[0] : null
-  const quickVariant = quickLookup?.variants?.find((variant) => getVariantPrices(variant, quickLookup.pricingScope).length)
-  const quickPrices = quickVariant ? getVariantPrices(quickVariant, quickLookup.pricingScope) : []
-  const quickPriceSummary = quickPrices.map((price) => `${price.label}: ${money(quickVariant[price.key])}`).join(' · ')
+  const priceKey = tierPriceKey(priceTier)
+  const quickVariant = quickLookup?.variants?.find((variant) => hasPrice(variant[priceKey]))
+  const quickUnitLabel = quickLookup && quickVariant ? tierUnitLabel(quickLookup, quickVariant, priceTier) : ''
+  const quickPriceSummary = quickVariant ? `${money(quickVariant[priceKey])} · ${quickUnitLabel}` : ''
 
   const saveProduct = (data) => {
     const pricingScope = validPricingScope(data.pricingScope) ? data.pricingScope : 'retail'
@@ -156,9 +264,13 @@ function App() {
         retailPrice: pricingScope === 'wholesale' ? null : variant.retailPrice,
         wholesalePrice: pricingScope === 'retail' ? null : variant.wholesalePrice,
       }))
-      return { ...p, ...data, pricingScope, variants }
+      const listCategories = pricingScope === 'both' ? ['Fridge Retail', 'Wholesale Stocks'] : [categoryForTier(pricingScope === 'retail' ? 'Retail' : 'Wholesale')]
+      return { ...p, ...data, pricingScope, categories: [...new Set([data.category, ...listCategories])], variants }
     }))
-    else setProducts((items) => [...items, { ...data, pricingScope, id: uid('p'), variants: [{ id: uid('v'), sizeLabel: 'Standard', retailPrice: null, wholesalePrice: null, packQuantity: 1 }] }])
+    else {
+      const listCategories = pricingScope === 'both' ? ['Fridge Retail', 'Wholesale Stocks'] : [categoryForTier(pricingScope === 'retail' ? 'Retail' : 'Wholesale')]
+      setProducts((items) => [...items, { ...data, pricingScope, categories: [...new Set([data.category, ...listCategories])], id: uid('p'), variants: [{ id: uid('v'), sizeLabel: 'Standard', retailPrice: null, wholesalePrice: null, retailUnitLabel: getRetailUnitLabel(data.name), wholesaleUnitLabel: 'Carton / box', packQuantity: 1 }] }])
+    }
     closeModal()
   }
   const saveVariant = (data) => {
@@ -169,6 +281,8 @@ function App() {
         ...data,
         retailPrice: scope === 'wholesale' ? null : data.retailPrice,
         wholesalePrice: scope === 'retail' ? null : data.wholesalePrice,
+        retailUnitLabel: data.retailUnitLabel || p.variants.find((item) => item.id === data.id)?.retailUnitLabel || getRetailUnitLabel(p.name),
+        wholesaleUnitLabel: data.wholesaleUnitLabel || p.variants.find((item) => item.id === data.id)?.wholesaleUnitLabel || 'Carton / box',
         packQuantity: Number(data.packQuantity || 1),
       }
       return { ...p, variants: p.variants.some((item) => item.id === data.id) ? p.variants.map((item) => item.id === data.id ? variant : item) : [...p.variants, { ...variant, id: uid('v') }] }
@@ -192,7 +306,7 @@ function App() {
         </div>
         <button className="icon-button menu-button" aria-label={menuOpen ? 'Close categories menu' : 'Open categories menu'} aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}>{menuOpen ? <X size={20} /> : <Menu size={20} />}</button>
       </div>
-      {menuOpen && <nav className="category-nav menu-panel" aria-label="Drink categories">{categories.map((item) => { const Icon = icons[item] || GlassWater; return <button key={item} onClick={() => { setCategory(item); setMenuOpen(false) }} className={category === item ? 'active' : ''}>{item !== 'All' && <Icon size={15} />}{item}</button> })}</nav>}
+      {menuOpen && <nav className="category-nav menu-panel" aria-label="Drink categories">{categories.map((item) => { const Icon = icons[item] || GlassWater; return <button key={item} onClick={() => { setCategory(item); if (item === 'Fridge Retail') setPriceTier('Retail'); if (item === 'Wholesale Stocks') setPriceTier('Wholesale'); setMenuOpen(false) }} className={category === item ? 'active' : ''}>{item !== 'All' && <Icon size={15} />}{item}</button> })}</nav>}
     </header>
     <main>
       <section className="counter-hero">
@@ -204,40 +318,49 @@ function App() {
         <div className="counter-price-card">
           <span className="eyebrow">MATCH</span>
           <h2>{quickLookup ? quickLookup.name : search.trim() ? 'No match' : 'Ready to search'}</h2>
-          <div className="counter-price">{quickPrices.length ? quickPrices.map((price) => <div className="counter-price-row" key={price.key}><span>{price.label}</span><strong>{money(quickVariant[price.key])}</strong></div>) : '—'}</div>
-          <small>{quickLookup ? `${quickLookup.category} · ${quickVariant?.sizeLabel || 'Price'}` : 'Search a drink name or size'}</small>
+          <div className="counter-price">{quickVariant ? money(quickVariant[priceKey]) : '—'}</div>
+          <small>{quickLookup ? `${categoryForTier(priceTier)} · ${quickUnitLabel}` : 'Search a drink name or size'}</small>
         </div>
       </section>
       <div className="lookup-strip">
         <div>
           <span className="eyebrow">QUICK LOOKUP</span>
-          <strong>{quickLookup ? `${quickLookup.name} · ${quickPriceSummary || 'No price entered'}` : search.trim() ? 'No drink found' : 'Enter a drink or size to see its price'}</strong>
+          <strong>{quickLookup ? `${quickLookup.name} · ${quickPriceSummary || 'No price for this list'}` : search.trim() ? 'No drink found' : 'Enter a drink or size to see its price'}</strong>
         </div>
         <button className="ghost-button" onClick={() => setSearch('')}>Clear</button>
       </div>
       <div className="toolbar counter-toolbar">
         <label className="search-box"><Search size={18} /><input ref={searchInputRef} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search drinks, sizes..." /><kbd>⌘ K</kbd></label>
+        <div className="tier-switch" role="group" aria-label="Price list">
+          <button className={priceTier === 'Retail' ? 'selected' : ''} aria-pressed={priceTier === 'Retail'} onClick={() => { setPriceTier('Retail'); setCategory('All') }}>Retail · single</button>
+          <button className={priceTier === 'Wholesale' ? 'selected' : ''} aria-pressed={priceTier === 'Wholesale'} onClick={() => { setPriceTier('Wholesale'); setCategory('All') }}>Wholesale · carton</button>
+        </div>
       </div>
       <div className="catalog-heading"><div><span className="eyebrow">CURATED SELECTION</span><h2>{category === 'All' ? 'All drinks' : category}<span>{filtered.length} items</span></h2></div>{mode === 'Admin' && <div className="catalog-actions"><button className="danger-button" onClick={clearCatalog} disabled={!products.length}><Trash2 size={16} /> Remove all</button><button className="outline-button" onClick={() => { setEditingProduct(null); setModal('product') }}><Plus size={16} /> Add product</button></div>}</div>
-      {filtered.length ? <section className="product-grid">{filtered.map((product, index) => <ProductCard key={product.id} product={product} admin={mode === 'Admin'} index={index} onEdit={() => { setEditingProduct(product); setModal('product') }} onDelete={() => deleteProduct(product.id)} onAddVariant={() => { setEditingVariant({ productId: product.id }); setModal('variant') }} onEditVariant={(variant) => { setEditingVariant({ ...variant, productId: product.id }); setModal('variant') }} onDeleteVariant={(id) => deleteVariant(product.id, id)} />)}</section> : <div className="empty"><Search size={28} /><h3>No drinks found</h3><p>Try another search or category.</p></div>}
+      {filtered.length ? <section className="product-grid">{filtered.map((product, index) => <ProductCard key={product.id} product={product} admin={mode === 'Admin'} priceTier={priceTier} index={index} onEdit={() => { setEditingProduct(product); setModal('product') }} onDelete={() => deleteProduct(product.id)} onAddVariant={() => { setEditingVariant({ productId: product.id }); setModal('variant') }} onEditVariant={(variant) => { setEditingVariant({ ...variant, productId: product.id }); setModal('variant') }} onDeleteVariant={(id) => deleteVariant(product.id, id)} />)}</section> : <div className="empty"><Search size={28} /><h3>{search.trim() ? 'No matching price in this list' : 'No drinks in this list'}</h3><p>Try another search or switch price lists.</p></div>}
     </main>
     {mode === 'Admin' && <button className="admin-fab" onClick={() => { setEditingProduct(null); setModal('product') }}><Plus size={22} /><span>New item</span></button>}
     {modal && <Modal type={modal} product={editingProduct} variant={editingVariant} products={products} onClose={closeModal} onSaveProduct={saveProduct} onSaveVariant={saveVariant} />}
   </div>
 }
 
-function ProductCard({ product, admin, index, onEdit, onDelete, onAddVariant, onEditVariant, onDeleteVariant }) {
-  const Icon = icons[product.category] || GlassWater
+function ProductCard({ product, admin, priceTier, index, onEdit, onDelete, onAddVariant, onEditVariant, onDeleteVariant }) {
+  const categories = product.categories?.length ? product.categories : [product.category]
+  const listCategory = categoryForTier(priceTier)
+  const cardCategory = categories.includes(listCategory) ? listCategory : product.category
+  const Icon = icons[cardCategory] || GlassWater
+  const tierDescription = `${listCategory} · ${priceTier === 'Retail' ? getRetailUnitLabel(product.name) : getWholesaleUnitLabel(product.variants[0])}`
+  const customDescription = product.description?.startsWith('DECORCH ENTERPRISE') ? '' : product.description
+  const description = [customDescription, tierDescription].filter(Boolean).join(' · ')
   return <article className={`product-card accent-${product.accent}`} style={{ '--delay': `${index * 55}ms` }}>
-    <div className="card-top"><div className="product-icon"><Icon size={22} /></div><span className="category-label">{product.category}</span>{admin && <div className="card-actions"><button onClick={onEdit} aria-label={`Edit ${product.name}`}><Edit3 size={15} /></button><button onClick={onDelete} aria-label={`Delete ${product.name}`}><Trash2 size={15} /></button></div>}</div>
-    <h3>{product.name}</h3><p className="description">{product.description}</p>
+    <div className="card-top"><div className="product-icon"><Icon size={22} /></div><span className="category-label">{cardCategory}</span>{admin && <div className="card-actions"><button onClick={onEdit} aria-label={`Edit ${product.name}`}><Edit3 size={15} /></button><button onClick={onDelete} aria-label={`Delete ${product.name}`}><Trash2 size={15} /></button></div>}</div>
+    <h3>{product.name}</h3><p className="description">{description}</p>
     <div className="variants">{product.variants.map((variant) => {
-      const prices = getVariantPrices(variant, product.pricingScope)
-      return <div className="variant-row" key={variant.id}>
-        <span className="size-badge">{variant.sizeLabel}</span>
-        <div className="variant-prices">
-          {prices.length ? prices.map((price) => <div className="variant-price" key={price.key}><span>{price.label}</span><strong>{money(variant[price.key])}</strong></div>) : <div className="variant-price"><span>No price yet</span><strong>—</strong></div>}
-        </div>
+      const variantPrice = variant[tierPriceKey(priceTier)]
+      if (!admin && !hasPrice(variantPrice)) return null
+      return <div className={`variant-row ${admin ? 'admin' : ''}`} key={variant.id}>
+        <span className="size-badge">{variant.sizeLabel}<small>{tierUnitLabel(product, variant, priceTier)}</small></span>
+        <strong>{hasPrice(variantPrice) ? money(variantPrice) : 'No price'}</strong>
         {admin && <div className="variant-actions"><button onClick={() => onEditVariant(variant)} aria-label={`Edit ${variant.sizeLabel} price`}><Edit3 size={12} /></button><button onClick={() => onDeleteVariant(variant.id)} aria-label={`Delete ${variant.sizeLabel} price`}><Trash2 size={12} /></button></div>}
       </div>
     })}</div>
@@ -247,7 +370,7 @@ function ProductCard({ product, admin, index, onEdit, onDelete, onAddVariant, on
 
 function Modal({ type, product, variant, products, onClose, onSaveProduct, onSaveVariant }) {
   const [tab, setTab] = useState(type === 'variant' ? 'variant' : 'product')
-  const [form, setForm] = useState(type === 'variant' ? { ...variant } : { name: product?.name || '', category: product?.category || 'Coffee', description: product?.description || '', accent: product?.accent || 'cyan', pricingScope: product?.pricingScope || 'retail' })
+  const [form, setForm] = useState(type === 'variant' ? { ...variant, retailUnitLabel: variant?.retailUnitLabel || '', wholesaleUnitLabel: variant?.wholesaleUnitLabel || 'Carton / box', packQuantity: variant?.packQuantity || 1 } : { name: product?.name || '', category: product?.category || 'Coffee', description: product?.description || '', accent: product?.accent || 'cyan', pricingScope: product?.pricingScope || 'retail' })
   const update = (key, value) => setForm((current) => ({ ...current, [key]: value }))
   const selectedProduct = products.find((item) => item.id === form.productId)
   const variantScope = validPricingScope(selectedProduct?.pricingScope) ? selectedProduct.pricingScope : 'both'
@@ -272,7 +395,12 @@ function Modal({ type, product, variant, products, onClose, onSaveProduct, onSav
         <label>Product<select required disabled={Boolean(variant?.id)} value={form.productId || ''} onChange={(e) => update('productId', e.target.value)}><option value="" disabled>Select product</option>{products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
         <label>Size label<input required value={form.sizeLabel || ''} onChange={(e) => update('sizeLabel', e.target.value)} placeholder="e.g. 20 oz" /></label>
         {variantScope !== 'wholesale' && <label className={variantScope === 'retail' ? 'full' : ''}>Retail price · per item<input type="number" min="0" step="0.01" value={form.retailPrice ?? ''} onChange={(e) => update('retailPrice', e.target.value === '' ? null : e.target.value)} /></label>}
-        {variantScope !== 'retail' && <label className={variantScope === 'wholesale' ? 'full' : ''}>Wholesale price · stock entry<input type="number" min="0" step="0.01" value={form.wholesalePrice ?? ''} onChange={(e) => update('wholesalePrice', e.target.value === '' ? null : e.target.value)} /></label>}
+        {variantScope !== 'retail' && <label className={variantScope === 'wholesale' ? 'full' : ''}>Wholesale price · per carton / box<input type="number" min="0" step="0.01" value={form.wholesalePrice ?? ''} onChange={(e) => update('wholesalePrice', e.target.value === '' ? null : e.target.value)} /></label>}
+        {variantScope !== 'wholesale' && <label>Retail unit label<input value={form.retailUnitLabel || ''} onChange={(e) => update('retailUnitLabel', e.target.value)} placeholder="Single bottle, sachet, or item" /></label>}
+        {variantScope !== 'retail' && <>
+          <label>Wholesale unit label<input value={form.wholesaleUnitLabel || ''} onChange={(e) => update('wholesaleUnitLabel', e.target.value)} placeholder="Carton / box" /></label>
+          <label>Units per carton / box<input type="number" min="1" step="1" value={form.packQuantity || 1} onChange={(e) => update('packQuantity', e.target.value)} /></label>
+        </>}
       </>}
     </div><button className="primary-button submit" type="submit">{product || variant?.id ? 'Save changes' : 'Add to catalog'} <Sparkles size={15} /></button></form>}
   </div></div>
