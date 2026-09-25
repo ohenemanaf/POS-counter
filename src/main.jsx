@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import './styles.light.css'
 
-const catalogVersion = 'decorch-enterprise-full-menu-v2'
+const catalogVersion = 'decorch-enterprise-full-menu-v3'
 const wholesaleStocks = [
   ['SACHET-AQUA FRESH', 10], ['SACHETS- COOL', 12], ['SACHETS- MOBILE', 12], ['SACHETS- EVERPURE', 15], ['SACHETS- STANDARD', 12],
   ['VERNA', 32], ['SLIMFIT', 28], ['BEL-ACTIVE', 55], ['PERLA WATER (S)', 34], ['PERLA WATER (M)', 34], ['AWAKE-SMALL', 30], ['AWAKE MEDIUM', 38],
@@ -33,6 +33,7 @@ const buildProducts = (items, category) => items.map(([name, price], index) => (
   id: `${category === 'Wholesale Stocks' ? 'w' : 'r'}${index + 1}`,
   name,
   category,
+  pricingScope: category === 'Wholesale Stocks' ? 'wholesale' : 'retail',
   description: category === 'Wholesale Stocks' ? 'DECORCH ENTERPRISE · wholesale stock' : 'DECORCH ENTERPRISE · fridge retail',
   accent: ['cyan', 'green', 'amber', 'orange', 'pink'][index % 5],
   variants: (Array.isArray(price) ? price : [price]).map((variantPrice, variantIndex) => ({
@@ -50,21 +51,30 @@ const icons = { Coffee, Soda: GlassWater, Juice: Wine, 'Craft Beer': Beer, Shake
 const uid = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 const hasPrice = (value) => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value))
 const money = (value) => hasPrice(value) ? `GH₵${Number(value).toFixed(2)}` : '—'
+const validPricingScope = (scope) => ['retail', 'wholesale', 'both'].includes(scope)
+const inferPricingScope = (product) => {
+  const variants = Array.isArray(product.variants) ? product.variants : []
+  const hasRetail = variants.some((variant) => hasPrice(variant?.retailPrice))
+  const hasWholesale = variants.some((variant) => hasPrice(variant?.wholesalePrice))
+  if (hasRetail && hasWholesale) return 'both'
+  if (hasWholesale) return 'wholesale'
+  if (hasRetail) return 'retail'
+  return product.category === 'Wholesale Stocks' ? 'wholesale' : 'retail'
+}
 const migrateProducts = (stored) => stored
   .filter((product) => product && typeof product.name === 'string' && product.name.trim() && typeof product.category === 'string' && product.category.trim() && Array.isArray(product.variants))
   .map((product) => {
     const seed = seedProductsById.get(product.id)
-    if (!seed || !Array.isArray(product.variants)) return product
-    const sourcePriceKey = seed.category === 'Wholesale Stocks' ? 'wholesalePrice' : 'retailPrice'
+    const sourcePriceKey = seed?.pricingScope === 'wholesale' ? 'wholesalePrice' : 'retailPrice'
     const unusedPriceKey = sourcePriceKey === 'wholesalePrice' ? 'retailPrice' : 'wholesalePrice'
     const variants = product.variants.map((variant) => {
-      const seedVariant = seed.variants.find((item) => item.id === variant.id)
+      const seedVariant = seed?.variants.find((item) => item.id === variant?.id)
       if (!seedVariant) return variant
       const sourcePrice = seedVariant[sourcePriceKey]
       const wasDuplicatedSeedPrice = hasPrice(sourcePrice) && Number(variant[sourcePriceKey]) === sourcePrice && Number(variant[unusedPriceKey]) === sourcePrice
       return wasDuplicatedSeedPrice ? { ...variant, [unusedPriceKey]: null } : variant
     })
-    return { ...product, variants }
+    return { ...product, pricingScope: validPricingScope(product.pricingScope) ? product.pricingScope : seed?.pricingScope || inferPricingScope(product), variants }
   })
 const loadProducts = () => {
   try {
@@ -115,7 +125,12 @@ function App() {
   }, [])
 
   const priceKey = priceTier === 'Retail' ? 'retailPrice' : 'wholesalePrice'
-  const tierProducts = useMemo(() => mode === 'Admin' ? products : products.filter((product) => Array.isArray(product.variants) && product.variants.some((variant) => hasPrice(variant[priceKey]))), [products, mode, priceKey])
+  const tierProducts = useMemo(() => products.filter((product) => {
+    const scope = validPricingScope(product.pricingScope) ? product.pricingScope : 'both'
+    const belongsToTier = scope === 'both' || scope === priceTier.toLowerCase()
+    const hasTierPrice = Array.isArray(product.variants) && product.variants.some((variant) => hasPrice(variant[priceKey]))
+    return belongsToTier && (mode === 'Admin' || hasTierPrice)
+  }), [products, mode, priceTier, priceKey])
   const categories = useMemo(() => ['All', ...new Set(tierProducts.map((p) => p.category))], [tierProducts])
   useEffect(() => {
     if (category !== 'All' && !categories.includes(category)) setCategory('All')
@@ -132,12 +147,31 @@ function App() {
   const quickPrice = quickVariant ? money(quickVariant[priceKey]) : '—'
 
   const saveProduct = (data) => {
-    if (editingProduct) setProducts((items) => items.map((p) => p.id === editingProduct.id ? { ...p, ...data } : p))
-    else setProducts((items) => [...items, { ...data, id: uid('p'), variants: [{ id: uid('v'), sizeLabel: 'Standard', retailPrice: null, wholesalePrice: null, packQuantity: 1 }] }])
+    const pricingScope = validPricingScope(data.pricingScope) ? data.pricingScope : 'retail'
+    if (editingProduct) setProducts((items) => items.map((p) => {
+      if (p.id !== editingProduct.id) return p
+      const variants = p.variants.map((variant) => ({
+        ...variant,
+        retailPrice: pricingScope === 'wholesale' ? null : variant.retailPrice,
+        wholesalePrice: pricingScope === 'retail' ? null : variant.wholesalePrice,
+      }))
+      return { ...p, ...data, pricingScope, variants }
+    }))
+    else setProducts((items) => [...items, { ...data, pricingScope, id: uid('p'), variants: [{ id: uid('v'), sizeLabel: 'Standard', retailPrice: null, wholesalePrice: null, packQuantity: 1 }] }])
     closeModal()
   }
   const saveVariant = (data) => {
-    setProducts((items) => items.map((p) => p.id === data.productId ? { ...p, variants: p.variants.some((v) => v.id === data.id) ? p.variants.map((v) => v.id === data.id ? data : v) : [...p.variants, { ...data, id: uid('v') }] } : p))
+    setProducts((items) => items.map((p) => {
+      if (p.id !== data.productId) return p
+      const scope = validPricingScope(p.pricingScope) ? p.pricingScope : 'both'
+      const variant = {
+        ...data,
+        retailPrice: scope === 'wholesale' ? null : data.retailPrice,
+        wholesalePrice: scope === 'retail' ? null : data.wholesalePrice,
+        packQuantity: Number(data.packQuantity || 1),
+      }
+      return { ...p, variants: p.variants.some((item) => item.id === data.id) ? p.variants.map((item) => item.id === data.id ? variant : item) : [...p.variants, { ...variant, id: uid('v') }] }
+    }))
     closeModal()
   }
   const deleteProduct = (id) => { if (window.confirm('Remove this drink from the catalog?')) setProducts((items) => items.filter((p) => p.id !== id)) }
@@ -182,7 +216,7 @@ function App() {
       </div>
       <div className="toolbar counter-toolbar">
         <label className="search-box"><Search size={18} /><input ref={searchInputRef} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search drinks, sizes..." /><kbd>⌘ K</kbd></label>
-        <div className="tier-switch"><button className={priceTier === 'Retail' ? 'selected' : ''} onClick={() => { setPriceTier('Retail'); setCategory('All') }}>Retail · item</button><button className={priceTier === 'Wholesale' ? 'selected' : ''} onClick={() => { setPriceTier('Wholesale'); setCategory('All') }}>Wholesale · stock</button></div>
+        <div className="tier-switch"><button className={priceTier === 'Retail' ? 'selected' : ''} onClick={() => { setPriceTier('Retail'); setCategory('All') }}>Retail items</button><button className={priceTier === 'Wholesale' ? 'selected' : ''} onClick={() => { setPriceTier('Wholesale'); setCategory('All') }}>Wholesale stock</button></div>
       </div>
       <div className="catalog-heading"><div><span className="eyebrow">CURATED SELECTION</span><h2>{category === 'All' ? 'All drinks' : category}<span>{filtered.length} items</span></h2></div>{mode === 'Admin' && <div className="catalog-actions"><button className="danger-button" onClick={clearCatalog} disabled={!products.length}><Trash2 size={16} /> Remove all</button><button className="outline-button" onClick={() => { setEditingProduct(null); setModal('product') }}><Plus size={16} /> Add product</button></div>}</div>
       {filtered.length ? <section className="product-grid">{filtered.map((product, index) => <ProductCard key={product.id} product={product} priceTier={priceTier} admin={mode === 'Admin'} index={index} onEdit={() => { setEditingProduct(product); setModal('product') }} onDelete={() => deleteProduct(product.id)} onAddVariant={() => { setEditingVariant({ productId: product.id }); setModal('variant') }} onEditVariant={(variant) => { setEditingVariant({ ...variant, productId: product.id }); setModal('variant') }} onDeleteVariant={(id) => deleteVariant(product.id, id)} />)}</section> : <div className="empty"><Search size={28} /><h3>No drinks found</h3><p>Try another search or category.</p></div>}
@@ -198,27 +232,40 @@ function ProductCard({ product, priceTier, admin, index, onEdit, onDelete, onAdd
   return <article className={`product-card accent-${product.accent}`} style={{ '--delay': `${index * 55}ms` }}>
     <div className="card-top"><div className="product-icon"><Icon size={22} /></div><span className="category-label">{product.category}</span>{admin && <div className="card-actions"><button onClick={onEdit} aria-label={`Edit ${product.name}`}><Edit3 size={15} /></button><button onClick={onDelete} aria-label={`Delete ${product.name}`}><Trash2 size={15} /></button></div>}</div>
     <h3>{product.name}</h3><p className="description">{product.description}</p>
-    <div className="variants">{product.variants.map((variant) => <div className="variant-row" key={variant.id}><span className="size-badge">{variant.sizeLabel}<small>{priceTier === 'Retail' ? 'retail item' : 'wholesale stock'}</small></span><strong>{money(variant[priceKey])}</strong>{admin && <div className="variant-actions"><button onClick={() => onEditVariant(variant)} aria-label={`Edit ${variant.sizeLabel} price`}><Edit3 size={12} /></button><button onClick={() => onDeleteVariant(variant.id)} aria-label={`Delete ${variant.sizeLabel} price`}><Trash2 size={12} /></button></div>}</div>)}</div>
+    <div className="variants">{product.variants.map((variant) => <div className="variant-row" key={variant.id}><span className="size-badge">{variant.sizeLabel}<small>{priceTier === 'Retail' ? 'retail price' : 'stock price'}</small></span><strong>{money(variant[priceKey])}</strong>{admin && <div className="variant-actions"><button onClick={() => onEditVariant(variant)} aria-label={`Edit ${variant.sizeLabel} price`}><Edit3 size={12} /></button><button onClick={() => onDeleteVariant(variant.id)} aria-label={`Delete ${variant.sizeLabel} price`}><Trash2 size={12} /></button></div>}</div>)}</div>
     {admin && <button className="add-variant" onClick={onAddVariant}><Plus size={14} /> Add size variant</button>}
   </article>
 }
 
 function Modal({ type, product, variant, products, onClose, onSaveProduct, onSaveVariant }) {
   const [tab, setTab] = useState(type === 'variant' ? 'variant' : 'product')
-  const [form, setForm] = useState(type === 'variant' ? { ...variant } : { name: product?.name || '', category: product?.category || 'Coffee', description: product?.description || '', accent: product?.accent || 'cyan' })
+  const [form, setForm] = useState(type === 'variant' ? { ...variant } : { name: product?.name || '', category: product?.category || 'Coffee', description: product?.description || '', accent: product?.accent || 'cyan', pricingScope: product?.pricingScope || 'retail' })
   const update = (key, value) => setForm((current) => ({ ...current, [key]: value }))
+  const selectedProduct = products.find((item) => item.id === form.productId)
+  const variantScope = validPricingScope(selectedProduct?.pricingScope) ? selectedProduct.pricingScope : 'both'
   const submit = (e) => {
     e.preventDefault()
     if (type === 'variant') {
       const asOptionalPrice = (value) => value === null || value === '' || value === undefined ? null : Number(value)
-      onSaveVariant({ ...form, retailPrice: asOptionalPrice(form.retailPrice), wholesalePrice: asOptionalPrice(form.wholesalePrice), packQuantity: Number(form.packQuantity) })
+      onSaveVariant({ ...form, retailPrice: asOptionalPrice(form.retailPrice), wholesalePrice: asOptionalPrice(form.wholesalePrice), packQuantity: Number(form.packQuantity || 1) })
     } else if (tab === 'product') onSaveProduct(form)
   }
   return <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}><div className="modal" role="dialog" aria-modal="true">
     <div className="modal-header"><div><span className="eyebrow">CATALOG ADMIN</span><h2>{tab === 'variant' ? (variant?.id ? 'Edit size variant' : 'Add size variant') : (product ? 'Edit product' : 'Add product')}</h2></div><button className="close-button" onClick={onClose} aria-label="Close"><X size={20} /></button></div>
     <div className="modal-tabs">{type === 'product' ? <><button className={tab === 'category' ? 'active' : ''} onClick={() => setTab('category')}>Category</button><button className={tab === 'product' ? 'active' : ''} onClick={() => setTab('product')}>Product</button></> : <button className="active" type="button">Variant</button>}</div>
     {tab === 'category' ? <div className="category-manager"><p>Categories are created automatically from products. To add one, create a product and enter its category below.</p><button onClick={() => setTab('product')} className="primary-button">Create a product <ChevronDown size={16} /></button></div> : <form onSubmit={submit}><div className="form-grid">
-      {tab === 'product' ? <><label>Product name<input required value={form.name} onChange={(e) => update('name', e.target.value)} placeholder="e.g. Cold Brew" /></label><label>Category<input required value={form.category} onChange={(e) => update('category', e.target.value)} placeholder="e.g. Coffee" /></label><label className="full">Description<input value={form.description} onChange={(e) => update('description', e.target.value)} placeholder="Short tasting notes" /></label><label>Card color<select value={form.accent} onChange={(e) => update('accent', e.target.value)}>{['cyan', 'green', 'amber', 'orange', 'purple', 'pink'].map((color) => <option key={color}>{color}</option>)}</select></label></> : <><label>Product<select required disabled={Boolean(variant?.id)} value={form.productId || ''} onChange={(e) => update('productId', e.target.value)}><option value="" disabled>Select product</option>{products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label><label>Size label<input required value={form.sizeLabel || ''} onChange={(e) => update('sizeLabel', e.target.value)} placeholder="e.g. 20 oz" /></label><label>Retail price · per item<input type="number" min="0" step="0.01" value={form.retailPrice ?? ''} onChange={(e) => update('retailPrice', e.target.value === '' ? null : e.target.value)} /></label><label>Wholesale price · stock entry<input type="number" min="0" step="0.01" value={form.wholesalePrice ?? ''} onChange={(e) => update('wholesalePrice', e.target.value === '' ? null : e.target.value)} /></label><label>Units per stock entry<input required type="number" min="1" value={form.packQuantity ?? 1} onChange={(e) => update('packQuantity', e.target.value)} /></label></>}
+      {tab === 'product' ? <>
+        <label>Product name<input required value={form.name} onChange={(e) => update('name', e.target.value)} placeholder="e.g. Cold Brew" /></label>
+        <label>Category<input required value={form.category} onChange={(e) => update('category', e.target.value)} placeholder="e.g. Coffee" /></label>
+        <label>Price list<select value={form.pricingScope} onChange={(e) => update('pricingScope', e.target.value)}><option value="retail">Retail only</option><option value="wholesale">Wholesale stock only</option><option value="both">Retail and wholesale</option></select></label>
+        <label>Card color<select value={form.accent} onChange={(e) => update('accent', e.target.value)}>{['cyan', 'green', 'amber', 'orange', 'purple', 'pink'].map((color) => <option key={color}>{color}</option>)}</select></label>
+        <label className="full">Description<input value={form.description} onChange={(e) => update('description', e.target.value)} placeholder="Short tasting notes" /></label>
+      </> : <>
+        <label>Product<select required disabled={Boolean(variant?.id)} value={form.productId || ''} onChange={(e) => update('productId', e.target.value)}><option value="" disabled>Select product</option>{products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+        <label>Size label<input required value={form.sizeLabel || ''} onChange={(e) => update('sizeLabel', e.target.value)} placeholder="e.g. 20 oz" /></label>
+        {variantScope !== 'wholesale' && <label className={variantScope === 'retail' ? 'full' : ''}>Retail price · per item<input type="number" min="0" step="0.01" value={form.retailPrice ?? ''} onChange={(e) => update('retailPrice', e.target.value === '' ? null : e.target.value)} /></label>}
+        {variantScope !== 'retail' && <label className={variantScope === 'wholesale' ? 'full' : ''}>Wholesale price · stock entry<input type="number" min="0" step="0.01" value={form.wholesalePrice ?? ''} onChange={(e) => update('wholesalePrice', e.target.value === '' ? null : e.target.value)} /></label>}
+      </>}
     </div><button className="primary-button submit" type="submit">{product || variant?.id ? 'Save changes' : 'Add to catalog'} <Sparkles size={15} /></button></form>}
   </div></div>
 }
