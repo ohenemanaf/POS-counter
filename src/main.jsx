@@ -52,6 +52,13 @@ const uid = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(36).sl
 const hasPrice = (value) => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value))
 const money = (value) => hasPrice(value) ? `GH₵${Number(value).toFixed(2)}` : '—'
 const validPricingScope = (scope) => ['retail', 'wholesale', 'both'].includes(scope)
+const getVariantPrices = (variant, scope) => {
+  const pricingScope = validPricingScope(scope) ? scope : 'both'
+  return [
+    { key: 'retailPrice', label: 'Retail', supported: pricingScope !== 'wholesale' },
+    { key: 'wholesalePrice', label: 'Wholesale stock', supported: pricingScope !== 'retail' },
+  ].filter((price) => price.supported && hasPrice(variant?.[price.key]))
+}
 const inferPricingScope = (product) => {
   const variants = Array.isArray(product.variants) ? product.variants : []
   const hasRetail = variants.some((variant) => hasPrice(variant?.retailPrice))
@@ -93,7 +100,6 @@ function App() {
 
   const [products, setProducts] = useState(loadProducts)
   const [mode, setMode] = useState(() => localStorage.getItem('pour-mode') || 'Display')
-  const [priceTier, setPriceTier] = useState('Retail')
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState('All')
   const [menuOpen, setMenuOpen] = useState(false)
@@ -124,27 +130,22 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
 
-  const priceKey = priceTier === 'Retail' ? 'retailPrice' : 'wholesalePrice'
-  const tierProducts = useMemo(() => products.filter((product) => {
-    const scope = validPricingScope(product.pricingScope) ? product.pricingScope : 'both'
-    const belongsToTier = scope === 'both' || scope === priceTier.toLowerCase()
-    const hasTierPrice = Array.isArray(product.variants) && product.variants.some((variant) => hasPrice(variant[priceKey]))
-    return belongsToTier && (mode === 'Admin' || hasTierPrice)
-  }), [products, mode, priceTier, priceKey])
-  const categories = useMemo(() => ['All', ...new Set(tierProducts.map((p) => p.category))], [tierProducts])
+  const visibleProducts = useMemo(() => mode === 'Admin' ? products : products.filter((product) => Array.isArray(product.variants) && product.variants.some((variant) => getVariantPrices(variant, product.pricingScope).length)), [products, mode])
+  const categories = useMemo(() => ['All', ...new Set(visibleProducts.map((p) => p.category))], [visibleProducts])
   useEffect(() => {
     if (category !== 'All' && !categories.includes(category)) setCategory('All')
   }, [category, categories])
-  const filtered = useMemo(() => tierProducts.filter((product) => {
+  const filtered = useMemo(() => visibleProducts.filter((product) => {
     const term = search.toLowerCase().trim()
     const variants = Array.isArray(product.variants) ? product.variants : []
     const matchesSearch = !term || [product.name, product.category, product.description, ...variants.map((v) => v.sizeLabel)].join(' ').toLowerCase().includes(term)
     return matchesSearch && (category === 'All' || product.category === category)
-  }), [tierProducts, search, category])
+  }), [visibleProducts, search, category])
 
-  const quickLookup = filtered[0]
-  const quickVariant = quickLookup?.variants?.find((variant) => hasPrice(variant[priceKey]))
-  const quickPrice = quickVariant ? money(quickVariant[priceKey]) : '—'
+  const quickLookup = search.trim() ? filtered[0] : null
+  const quickVariant = quickLookup?.variants?.find((variant) => getVariantPrices(variant, quickLookup.pricingScope).length)
+  const quickPrices = quickVariant ? getVariantPrices(quickVariant, quickLookup.pricingScope) : []
+  const quickPriceSummary = quickPrices.map((price) => `${price.label}: ${money(quickVariant[price.key])}`).join(' · ')
 
   const saveProduct = (data) => {
     const pricingScope = validPricingScope(data.pricingScope) ? data.pricingScope : 'retail'
@@ -202,37 +203,44 @@ function App() {
         </div>
         <div className="counter-price-card">
           <span className="eyebrow">MATCH</span>
-          <h2>{quickLookup ? quickLookup.name : 'No match'}</h2>
-          <div className="counter-price">{quickLookup ? quickPrice : '--'}</div>
-          <small>{quickLookup ? `${quickLookup.category} · ${quickVariant?.sizeLabel || 'Price only'} · ${priceTier === 'Wholesale' ? 'wholesale stock' : 'retail item'}` : 'Try a product or size name'}</small>
+          <h2>{quickLookup ? quickLookup.name : search.trim() ? 'No match' : 'Ready to search'}</h2>
+          <div className="counter-price">{quickPrices.length ? quickPrices.map((price) => <div className="counter-price-row" key={price.key}><span>{price.label}</span><strong>{money(quickVariant[price.key])}</strong></div>) : '—'}</div>
+          <small>{quickLookup ? `${quickLookup.category} · ${quickVariant?.sizeLabel || 'Price'}` : 'Search a drink name or size'}</small>
         </div>
       </section>
       <div className="lookup-strip">
         <div>
           <span className="eyebrow">QUICK LOOKUP</span>
-          <strong>{quickLookup ? `${quickLookup.name} · ${quickPrice}` : 'No drink found'}</strong>
+          <strong>{quickLookup ? `${quickLookup.name} · ${quickPriceSummary || 'No price entered'}` : search.trim() ? 'No drink found' : 'Enter a drink or size to see its price'}</strong>
         </div>
         <button className="ghost-button" onClick={() => setSearch('')}>Clear</button>
       </div>
       <div className="toolbar counter-toolbar">
         <label className="search-box"><Search size={18} /><input ref={searchInputRef} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search drinks, sizes..." /><kbd>⌘ K</kbd></label>
-        <div className="tier-switch"><button className={priceTier === 'Retail' ? 'selected' : ''} onClick={() => { setPriceTier('Retail'); setCategory('All') }}>Retail items</button><button className={priceTier === 'Wholesale' ? 'selected' : ''} onClick={() => { setPriceTier('Wholesale'); setCategory('All') }}>Wholesale stock</button></div>
       </div>
       <div className="catalog-heading"><div><span className="eyebrow">CURATED SELECTION</span><h2>{category === 'All' ? 'All drinks' : category}<span>{filtered.length} items</span></h2></div>{mode === 'Admin' && <div className="catalog-actions"><button className="danger-button" onClick={clearCatalog} disabled={!products.length}><Trash2 size={16} /> Remove all</button><button className="outline-button" onClick={() => { setEditingProduct(null); setModal('product') }}><Plus size={16} /> Add product</button></div>}</div>
-      {filtered.length ? <section className="product-grid">{filtered.map((product, index) => <ProductCard key={product.id} product={product} priceTier={priceTier} admin={mode === 'Admin'} index={index} onEdit={() => { setEditingProduct(product); setModal('product') }} onDelete={() => deleteProduct(product.id)} onAddVariant={() => { setEditingVariant({ productId: product.id }); setModal('variant') }} onEditVariant={(variant) => { setEditingVariant({ ...variant, productId: product.id }); setModal('variant') }} onDeleteVariant={(id) => deleteVariant(product.id, id)} />)}</section> : <div className="empty"><Search size={28} /><h3>No drinks found</h3><p>Try another search or category.</p></div>}
+      {filtered.length ? <section className="product-grid">{filtered.map((product, index) => <ProductCard key={product.id} product={product} admin={mode === 'Admin'} index={index} onEdit={() => { setEditingProduct(product); setModal('product') }} onDelete={() => deleteProduct(product.id)} onAddVariant={() => { setEditingVariant({ productId: product.id }); setModal('variant') }} onEditVariant={(variant) => { setEditingVariant({ ...variant, productId: product.id }); setModal('variant') }} onDeleteVariant={(id) => deleteVariant(product.id, id)} />)}</section> : <div className="empty"><Search size={28} /><h3>No drinks found</h3><p>Try another search or category.</p></div>}
     </main>
     {mode === 'Admin' && <button className="admin-fab" onClick={() => { setEditingProduct(null); setModal('product') }}><Plus size={22} /><span>New item</span></button>}
     {modal && <Modal type={modal} product={editingProduct} variant={editingVariant} products={products} onClose={closeModal} onSaveProduct={saveProduct} onSaveVariant={saveVariant} />}
   </div>
 }
 
-function ProductCard({ product, priceTier, admin, index, onEdit, onDelete, onAddVariant, onEditVariant, onDeleteVariant }) {
+function ProductCard({ product, admin, index, onEdit, onDelete, onAddVariant, onEditVariant, onDeleteVariant }) {
   const Icon = icons[product.category] || GlassWater
-  const priceKey = priceTier === 'Retail' ? 'retailPrice' : 'wholesalePrice'
   return <article className={`product-card accent-${product.accent}`} style={{ '--delay': `${index * 55}ms` }}>
     <div className="card-top"><div className="product-icon"><Icon size={22} /></div><span className="category-label">{product.category}</span>{admin && <div className="card-actions"><button onClick={onEdit} aria-label={`Edit ${product.name}`}><Edit3 size={15} /></button><button onClick={onDelete} aria-label={`Delete ${product.name}`}><Trash2 size={15} /></button></div>}</div>
     <h3>{product.name}</h3><p className="description">{product.description}</p>
-    <div className="variants">{product.variants.map((variant) => <div className="variant-row" key={variant.id}><span className="size-badge">{variant.sizeLabel}<small>{priceTier === 'Retail' ? 'retail price' : 'stock price'}</small></span><strong>{money(variant[priceKey])}</strong>{admin && <div className="variant-actions"><button onClick={() => onEditVariant(variant)} aria-label={`Edit ${variant.sizeLabel} price`}><Edit3 size={12} /></button><button onClick={() => onDeleteVariant(variant.id)} aria-label={`Delete ${variant.sizeLabel} price`}><Trash2 size={12} /></button></div>}</div>)}</div>
+    <div className="variants">{product.variants.map((variant) => {
+      const prices = getVariantPrices(variant, product.pricingScope)
+      return <div className="variant-row" key={variant.id}>
+        <span className="size-badge">{variant.sizeLabel}</span>
+        <div className="variant-prices">
+          {prices.length ? prices.map((price) => <div className="variant-price" key={price.key}><span>{price.label}</span><strong>{money(variant[price.key])}</strong></div>) : <div className="variant-price"><span>No price yet</span><strong>—</strong></div>}
+        </div>
+        {admin && <div className="variant-actions"><button onClick={() => onEditVariant(variant)} aria-label={`Edit ${variant.sizeLabel} price`}><Edit3 size={12} /></button><button onClick={() => onDeleteVariant(variant.id)} aria-label={`Delete ${variant.sizeLabel} price`}><Trash2 size={12} /></button></div>}
+      </div>
+    })}</div>
     {admin && <button className="add-variant" onClick={onAddVariant}><Plus size={14} /> Add size variant</button>}
   </article>
 }
