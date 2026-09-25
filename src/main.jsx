@@ -6,38 +6,54 @@ import {
 } from 'lucide-react'
 import './styles.light.css'
 
-const seedProducts = [
-  { id: 'p1', name: 'Brewed Coffee', category: 'Coffee', description: 'Slow-roasted house blend', accent: 'amber', variants: [
-    { id: 'v1', sizeLabel: '12 oz', retailPrice: 12.5, wholesalePrice: 9.5, packQuantity: 1 },
-    { id: 'v2', sizeLabel: '16 oz', retailPrice: 15.5, wholesalePrice: 12.0, packQuantity: 1 },
-  ]},
-  { id: 'p2', name: 'Mango Fizz', category: 'Soda', description: 'Tropical mango · sparkling', accent: 'orange', variants: [
-    { id: 'v3', sizeLabel: '12 oz', retailPrice: 14.0, wholesalePrice: 10.0, packQuantity: 1 },
-    { id: 'v4', sizeLabel: '24 oz', retailPrice: 22.5, wholesalePrice: 17.5, packQuantity: 1 },
-  ]},
-  { id: 'p3', name: 'Blueberry Lemonade', category: 'Juice', description: 'Fresh squeezed · lightly sweet', accent: 'purple', variants: [
-    { id: 'v5', sizeLabel: '16 oz', retailPrice: 18.0, wholesalePrice: 13.5, packQuantity: 1 },
-    { id: 'v6', sizeLabel: '1 gal', retailPrice: 60.0, wholesalePrice: 45.0, packQuantity: 1 },
-  ]},
-  { id: 'p4', name: 'Hazy IPA', category: 'Craft Beer', description: 'Citrus hops · 6.2% ABV', accent: 'green', variants: [
-    { id: 'v7', sizeLabel: '16 oz', retailPrice: 25.0, wholesalePrice: 19.0, packQuantity: 1 },
-    { id: 'v8', sizeLabel: '4 pack', retailPrice: 90.0, wholesalePrice: 72.0, packQuantity: 4 },
-  ]},
-  { id: 'p5', name: 'Vanilla Cloud', category: 'Shakes', description: 'Vanilla bean · whipped cream', accent: 'pink', variants: [
-    { id: 'v9', sizeLabel: '12 oz', retailPrice: 24.0, wholesalePrice: 18.0, packQuantity: 1 },
-    { id: 'v10', sizeLabel: '20 oz', retailPrice: 30.0, wholesalePrice: 22.0, packQuantity: 1 },
-  ]},
-  { id: 'p6', name: 'Sparkling Water', category: 'Water', description: 'Pure mineral · lime essence', accent: 'cyan', variants: [
-    { id: 'v11', sizeLabel: '16 oz', retailPrice: 9.5, wholesalePrice: 7.0, packQuantity: 1 },
-    { id: 'v12', sizeLabel: '12 pack', retailPrice: 79.0, wholesalePrice: 62.0, packQuantity: 12 },
-  ]},
+const catalogVersion = 'decorch-enterprise-full-menu-v1'
+const wholesaleStocks = [
+  ['SACHET-AQUA FRESH', 10], ['SACHETS- COOL', 12], ['SACHETS- MOBILE', 12], ['SACHETS- EVERPURE', 15], ['SACHETS- STANDARD', 12],
+  ['VERNA', 32], ['SLIMFIT', 28], ['BEL-ACTIVE', 55], ['PERLA WATER (S)', 34], ['PERLA WATER (M)', 34], ['AWAKE-SMALL', 30], ['AWAKE MEDIUM', 38],
+  ['VOLTIC-SMALL', 30], ['VOLTIC-MEDIUM', 38], ['VOLTIC -BIG', 38], ['Mont MONT', 30], ['Bel Malt', 75], ['BEL-AQUA-500 ML', 32],
+  ['BEL-AQUA -750ML (MED', 38], ['BEL -AQUA- 1,000ML', 38], ['BEL-AQUA-BOX', 65], ['BEL COLA', 47], ['BEGOO', 60], ['ANGELCOLA/SQUEEZ', 47],
+  ['VITAMILK CHAMP', 30], ['VITAMILK MEDIUM', 60], ['VITA MILK-BOTTLE', 90], ['HOLLANDIA KALYPPO', 50], ['PUKKA/TAMARINDA', 55], ['RUSH/STORM( S)', 65],
+  ['JUICEE', 55], ['TAMPICO-SMALL', 50], ['DARLING', 70], ['U-FRESH BOTTLE', 75], ['STORM BIG', 75], ['HAPPY DELIGHT', 55], ['PLASTIC COKE/FANTA', 70],
+  ['TAMPICO- MEDIUM', 70], ['ALVARO', 100], ['BETA MALT', 110], ['PLATIC MALT', 125], ['KALYPPO', 110], ['WHEAT MILK', 175], ['CAN MALT-SMALL', 155],
+  ['FRUIT- TELI', 175], ['FUN MAX/NUTRIDAY', 80], ['PLASTIC COKE -BIG', 150], ['BB COCKTAIL', 300], ['CAN COKE-SMALL', 75], ['CAN MALT-BIG', 300],
+  ['DON SIMON', 360], ['CERES', 480], ['VODY ENERGY', 480],
 ]
+const fridgeRetailItems = [
+  ['SACHET-ACQUA FRESH', 0.5], ['SACHET- EVERPURE', 0.5], ['ICE BLOCK(SACKET)', 1], ['ICE BLOCK(BIG)', 1.5], ['Bottle water (Small)', 3],
+  ['Bottle water (Medium)', 4], ['Bottle water (1.0L/1.5L)', [5, 7]], ['Bel Active', 5], ['Bel Drink', 4], ['YOGOT/CHOCO/FUN ICE', 5], ['FUN SUPER/PASSION', 5], ['KALYPO/HAPPY DELIG', 5],
+  ['PUKKA/TAMARINDA', 5], ['STORM/RUSH/5 STAR', 6], ['DARLING LEMON', 7], ['U-FRESH BOTTLE', 6], ['Honey', 65], ['STORM (SMALL)', 6],
+  ['STORM-B /BEL MALT', 7], ['TAMPICO', 7], ['PLASTIC COKE (S)', 7], ['HOLLANDIA KALYPPO ST', 7], ['NICHE CHOCOLATE', 9], ['CAN COKE/FANTA/', 12],
+  ['ALVARO', 12], ['VITAMILK (CHAMP)', 5], ['VITAMILK (MEDIUM)', 10], ['VITA MILK (BOTTLE)', 15], ['BETA MALT', 10], ['PLASTIC MALT', 12],
+  ['CAN MALT', 15], ['FUNMAX / NUTRIDAY', 15], ['BB COCKTAIL', 13], ['HALLANDIA -(M)', 15], ['HALLANDIA -(MM)', 18], ['Kiki Apple', 5],
+  ['FANTA/COKE(M)', 10], ['WHEAT MILK', 15], ['DON SIMON-SMALL', 20], ['LUCOZADE CAN', 15], ['LUCOZADE PLASTIC', 18], ['GUINNESS CAN', 18],
+  ['BLUE JEANS ENERGY', 20], ['VODY ENERGY', 20], ['RED BULL ENERGY', 25], ['KISS/SMIRNOFF(SMALL)', 20], ['KISS (BIG)', 25], ['FRUIT-TELI', 30],
+  ['VITAMIK (BIG)', 30], ['BIG FANTA/SPIRIT/ COKE', 25], ['HOLLANDIA-BIG', 35], ['DON SIMON-BIG', 35], ['WELCH', 45], ['CERES', 45], ['PILLOW', 75],
+]
+const buildProducts = (items, category) => items.map(([name, price], index) => ({
+  id: `${category === 'Wholesale Stocks' ? 'w' : 'r'}${index + 1}`,
+  name,
+  category,
+  description: category === 'Wholesale Stocks' ? 'DECORCH ENTERPRISE · wholesale stock' : 'DECORCH ENTERPRISE · fridge retail',
+  accent: ['cyan', 'green', 'amber', 'orange', 'pink'][index % 5],
+  variants: (Array.isArray(price) ? price : [price]).map((variantPrice, variantIndex) => ({
+    id: `v-${category[0].toLowerCase()}${index + 1}-${variantIndex + 1}`,
+    sizeLabel: Array.isArray(price) ? ['1.0L', '1.5L'][variantIndex] : category === 'Wholesale Stocks' ? 'Wholesale stock' : 'Fridge retail',
+    retailPrice: variantPrice,
+    wholesalePrice: variantPrice,
+    packQuantity: 1,
+  })),
+}))
+const seedProducts = [...buildProducts(wholesaleStocks, 'Wholesale Stocks'), ...buildProducts(fridgeRetailItems, 'Fridge Retail')]
 
 const icons = { Coffee, Soda: GlassWater, Juice: Wine, 'Craft Beer': Beer, Shakes: IceCreamBowl, Water: GlassWater }
 const uid = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 const money = (value) => `GH₵${Number(value || 0).toFixed(2)}`
 const loadProducts = () => {
   try {
+    if (localStorage.getItem('pour-catalog-version') !== catalogVersion) {
+      localStorage.setItem('pour-catalog-version', catalogVersion)
+      return seedProducts
+    }
     const stored = JSON.parse(localStorage.getItem('pour-products'))
     return Array.isArray(stored) ? stored : seedProducts
   } catch {
