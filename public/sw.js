@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pour-pos-v2'
+const CACHE_NAME = 'pour-pos-v3'
 const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg']
 
 self.addEventListener('install', (event) => {
