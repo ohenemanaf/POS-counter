@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import './styles.light.css'
 
-const catalogVersion = 'decorch-enterprise-full-menu-v1'
+const catalogVersion = 'decorch-enterprise-full-menu-v2'
 const wholesaleStocks = [
   ['SACHET-AQUA FRESH', 10], ['SACHETS- COOL', 12], ['SACHETS- MOBILE', 12], ['SACHETS- EVERPURE', 15], ['SACHETS- STANDARD', 12],
   ['VERNA', 32], ['SLIMFIT', 28], ['BEL-ACTIVE', 55], ['PERLA WATER (S)', 34], ['PERLA WATER (M)', 34], ['AWAKE-SMALL', 30], ['AWAKE MEDIUM', 38],
@@ -38,24 +38,41 @@ const buildProducts = (items, category) => items.map(([name, price], index) => (
   variants: (Array.isArray(price) ? price : [price]).map((variantPrice, variantIndex) => ({
     id: `v-${category[0].toLowerCase()}${index + 1}-${variantIndex + 1}`,
     sizeLabel: Array.isArray(price) ? ['1.0L', '1.5L'][variantIndex] : category === 'Wholesale Stocks' ? 'Wholesale stock' : 'Fridge retail',
-    retailPrice: variantPrice,
-    wholesalePrice: variantPrice,
+    retailPrice: category === 'Fridge Retail' ? variantPrice : null,
+    wholesalePrice: category === 'Wholesale Stocks' ? variantPrice : null,
     packQuantity: 1,
   })),
 }))
 const seedProducts = [...buildProducts(wholesaleStocks, 'Wholesale Stocks'), ...buildProducts(fridgeRetailItems, 'Fridge Retail')]
+const seedProductsById = new Map(seedProducts.map((product) => [product.id, product]))
 
 const icons = { Coffee, Soda: GlassWater, Juice: Wine, 'Craft Beer': Beer, Shakes: IceCreamBowl, Water: GlassWater }
 const uid = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-const money = (value) => `GH₵${Number(value || 0).toFixed(2)}`
+const hasPrice = (value) => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value))
+const money = (value) => hasPrice(value) ? `GH₵${Number(value).toFixed(2)}` : '—'
+const migrateProducts = (stored) => stored
+  .filter((product) => product && typeof product.name === 'string' && product.name.trim() && typeof product.category === 'string' && product.category.trim() && Array.isArray(product.variants))
+  .map((product) => {
+    const seed = seedProductsById.get(product.id)
+    if (!seed || !Array.isArray(product.variants)) return product
+    const sourcePriceKey = seed.category === 'Wholesale Stocks' ? 'wholesalePrice' : 'retailPrice'
+    const unusedPriceKey = sourcePriceKey === 'wholesalePrice' ? 'retailPrice' : 'wholesalePrice'
+    const variants = product.variants.map((variant) => {
+      const seedVariant = seed.variants.find((item) => item.id === variant.id)
+      if (!seedVariant) return variant
+      const sourcePrice = seedVariant[sourcePriceKey]
+      const wasDuplicatedSeedPrice = hasPrice(sourcePrice) && Number(variant[sourcePriceKey]) === sourcePrice && Number(variant[unusedPriceKey]) === sourcePrice
+      return wasDuplicatedSeedPrice ? { ...variant, [unusedPriceKey]: null } : variant
+    })
+    return { ...product, variants }
+  })
 const loadProducts = () => {
   try {
-    if (localStorage.getItem('pour-catalog-version') !== catalogVersion) {
-      localStorage.setItem('pour-catalog-version', catalogVersion)
-      return seedProducts
-    }
+    const needsMigration = localStorage.getItem('pour-catalog-version') !== catalogVersion
     const stored = JSON.parse(localStorage.getItem('pour-products'))
-    return Array.isArray(stored) ? stored : seedProducts
+    const products = Array.isArray(stored) ? (needsMigration ? migrateProducts(stored) : stored) : seedProducts
+    localStorage.setItem('pour-catalog-version', catalogVersion)
+    return products
   } catch {
     return seedProducts
   }
@@ -97,19 +114,26 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
 
-  const categories = useMemo(() => ['All', ...new Set(products.map((p) => p.category))], [products])
-  const filtered = useMemo(() => products.filter((product) => {
+  const priceKey = priceTier === 'Retail' ? 'retailPrice' : 'wholesalePrice'
+  const tierProducts = useMemo(() => mode === 'Admin' ? products : products.filter((product) => Array.isArray(product.variants) && product.variants.some((variant) => hasPrice(variant[priceKey]))), [products, mode, priceKey])
+  const categories = useMemo(() => ['All', ...new Set(tierProducts.map((p) => p.category))], [tierProducts])
+  useEffect(() => {
+    if (category !== 'All' && !categories.includes(category)) setCategory('All')
+  }, [category, categories])
+  const filtered = useMemo(() => tierProducts.filter((product) => {
     const term = search.toLowerCase().trim()
-    const matchesSearch = !term || [product.name, product.category, product.description, ...product.variants.map((v) => v.sizeLabel)].join(' ').toLowerCase().includes(term)
+    const variants = Array.isArray(product.variants) ? product.variants : []
+    const matchesSearch = !term || [product.name, product.category, product.description, ...variants.map((v) => v.sizeLabel)].join(' ').toLowerCase().includes(term)
     return matchesSearch && (category === 'All' || product.category === category)
-  }), [products, search, category])
+  }), [tierProducts, search, category])
 
   const quickLookup = filtered[0]
-  const quickPrice = quickLookup?.variants?.[0] ? money(priceTier === 'Retail' ? quickLookup.variants[0].retailPrice : quickLookup.variants[0].wholesalePrice) : '—'
+  const quickVariant = quickLookup?.variants?.find((variant) => hasPrice(variant[priceKey]))
+  const quickPrice = quickVariant ? money(quickVariant[priceKey]) : '—'
 
   const saveProduct = (data) => {
     if (editingProduct) setProducts((items) => items.map((p) => p.id === editingProduct.id ? { ...p, ...data } : p))
-    else setProducts((items) => [...items, { ...data, id: uid('p'), variants: [{ id: uid('v'), sizeLabel: '12 oz', retailPrice: 0, wholesalePrice: 0, packQuantity: 1 }] }])
+    else setProducts((items) => [...items, { ...data, id: uid('p'), variants: [{ id: uid('v'), sizeLabel: 'Standard', retailPrice: null, wholesalePrice: null, packQuantity: 1 }] }])
     closeModal()
   }
   const saveVariant = (data) => {
@@ -146,7 +170,7 @@ function App() {
           <span className="eyebrow">MATCH</span>
           <h2>{quickLookup ? quickLookup.name : 'No match'}</h2>
           <div className="counter-price">{quickLookup ? quickPrice : '--'}</div>
-          <small>{quickLookup ? `${quickLookup.category} · ${quickLookup.variants[0]?.sizeLabel || 'Price only'} · ${priceTier === 'Wholesale' ? 'carton/box' : 'single'}` : 'Try a product or size name'}</small>
+          <small>{quickLookup ? `${quickLookup.category} · ${quickVariant?.sizeLabel || 'Price only'} · ${priceTier === 'Wholesale' ? 'wholesale stock' : 'retail item'}` : 'Try a product or size name'}</small>
         </div>
       </section>
       <div className="lookup-strip">
@@ -158,7 +182,7 @@ function App() {
       </div>
       <div className="toolbar counter-toolbar">
         <label className="search-box"><Search size={18} /><input ref={searchInputRef} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search drinks, sizes..." /><kbd>⌘ K</kbd></label>
-        <div className="tier-switch"><button className={priceTier === 'Retail' ? 'selected' : ''} onClick={() => setPriceTier('Retail')}>Retail · single</button><button className={priceTier === 'Wholesale' ? 'selected' : ''} onClick={() => setPriceTier('Wholesale')}>Wholesale · carton</button></div>
+        <div className="tier-switch"><button className={priceTier === 'Retail' ? 'selected' : ''} onClick={() => { setPriceTier('Retail'); setCategory('All') }}>Retail · item</button><button className={priceTier === 'Wholesale' ? 'selected' : ''} onClick={() => { setPriceTier('Wholesale'); setCategory('All') }}>Wholesale · stock</button></div>
       </div>
       <div className="catalog-heading"><div><span className="eyebrow">CURATED SELECTION</span><h2>{category === 'All' ? 'All drinks' : category}<span>{filtered.length} items</span></h2></div>{mode === 'Admin' && <div className="catalog-actions"><button className="danger-button" onClick={clearCatalog} disabled={!products.length}><Trash2 size={16} /> Remove all</button><button className="outline-button" onClick={() => { setEditingProduct(null); setModal('product') }}><Plus size={16} /> Add product</button></div>}</div>
       {filtered.length ? <section className="product-grid">{filtered.map((product, index) => <ProductCard key={product.id} product={product} priceTier={priceTier} admin={mode === 'Admin'} index={index} onEdit={() => { setEditingProduct(product); setModal('product') }} onDelete={() => deleteProduct(product.id)} onAddVariant={() => { setEditingVariant({ productId: product.id }); setModal('variant') }} onEditVariant={(variant) => { setEditingVariant({ ...variant, productId: product.id }); setModal('variant') }} onDeleteVariant={(id) => deleteVariant(product.id, id)} />)}</section> : <div className="empty"><Search size={28} /><h3>No drinks found</h3><p>Try another search or category.</p></div>}
@@ -170,10 +194,11 @@ function App() {
 
 function ProductCard({ product, priceTier, admin, index, onEdit, onDelete, onAddVariant, onEditVariant, onDeleteVariant }) {
   const Icon = icons[product.category] || GlassWater
+  const priceKey = priceTier === 'Retail' ? 'retailPrice' : 'wholesalePrice'
   return <article className={`product-card accent-${product.accent}`} style={{ '--delay': `${index * 55}ms` }}>
     <div className="card-top"><div className="product-icon"><Icon size={22} /></div><span className="category-label">{product.category}</span>{admin && <div className="card-actions"><button onClick={onEdit} aria-label={`Edit ${product.name}`}><Edit3 size={15} /></button><button onClick={onDelete} aria-label={`Delete ${product.name}`}><Trash2 size={15} /></button></div>}</div>
     <h3>{product.name}</h3><p className="description">{product.description}</p>
-    <div className="variants">{product.variants.map((variant) => <div className="variant-row" key={variant.id}><span className="size-badge">{variant.sizeLabel}<small>{priceTier === 'Retail' ? 'single bottle' : `carton/box · ${variant.packQuantity || 1} units`}</small></span><strong>{money(priceTier === 'Retail' ? variant.retailPrice : variant.wholesalePrice)}</strong>{admin && <div className="variant-actions"><button onClick={() => onEditVariant(variant)} aria-label="Edit variant"><Edit3 size={12} /></button><button onClick={() => onDeleteVariant(variant.id)} aria-label="Delete variant"><Trash2 size={12} /></button></div>}</div>)}</div>
+    <div className="variants">{product.variants.map((variant) => <div className="variant-row" key={variant.id}><span className="size-badge">{variant.sizeLabel}<small>{priceTier === 'Retail' ? 'retail item' : 'wholesale stock'}</small></span><strong>{money(variant[priceKey])}</strong>{admin && <div className="variant-actions"><button onClick={() => onEditVariant(variant)} aria-label={`Edit ${variant.sizeLabel} price`}><Edit3 size={12} /></button><button onClick={() => onDeleteVariant(variant.id)} aria-label={`Delete ${variant.sizeLabel} price`}><Trash2 size={12} /></button></div>}</div>)}</div>
     {admin && <button className="add-variant" onClick={onAddVariant}><Plus size={14} /> Add size variant</button>}
   </article>
 }
@@ -182,12 +207,18 @@ function Modal({ type, product, variant, products, onClose, onSaveProduct, onSav
   const [tab, setTab] = useState(type === 'variant' ? 'variant' : 'product')
   const [form, setForm] = useState(type === 'variant' ? { ...variant } : { name: product?.name || '', category: product?.category || 'Coffee', description: product?.description || '', accent: product?.accent || 'cyan' })
   const update = (key, value) => setForm((current) => ({ ...current, [key]: value }))
-  const submit = (e) => { e.preventDefault(); tab === 'variant' ? onSaveVariant({ ...form, retailPrice: Number(form.retailPrice), wholesalePrice: Number(form.wholesalePrice), packQuantity: Number(form.packQuantity) }) : onSaveProduct(form) }
+  const submit = (e) => {
+    e.preventDefault()
+    if (type === 'variant') {
+      const asOptionalPrice = (value) => value === null || value === '' || value === undefined ? null : Number(value)
+      onSaveVariant({ ...form, retailPrice: asOptionalPrice(form.retailPrice), wholesalePrice: asOptionalPrice(form.wholesalePrice), packQuantity: Number(form.packQuantity) })
+    } else if (tab === 'product') onSaveProduct(form)
+  }
   return <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}><div className="modal" role="dialog" aria-modal="true">
     <div className="modal-header"><div><span className="eyebrow">CATALOG ADMIN</span><h2>{tab === 'variant' ? (variant?.id ? 'Edit size variant' : 'Add size variant') : (product ? 'Edit product' : 'Add product')}</h2></div><button className="close-button" onClick={onClose} aria-label="Close"><X size={20} /></button></div>
-    <div className="modal-tabs"><button className={tab === 'category' ? 'active' : ''} onClick={() => setTab('category')}>Category</button><button className={tab === 'product' ? 'active' : ''} onClick={() => setTab('product')}>Product</button><button className={tab === 'variant' ? 'active' : ''} onClick={() => setTab('variant')}>Variant</button></div>
+    <div className="modal-tabs">{type === 'product' ? <><button className={tab === 'category' ? 'active' : ''} onClick={() => setTab('category')}>Category</button><button className={tab === 'product' ? 'active' : ''} onClick={() => setTab('product')}>Product</button></> : <button className="active" type="button">Variant</button>}</div>
     {tab === 'category' ? <div className="category-manager"><p>Categories are created automatically from products. To add one, create a product and enter its category below.</p><button onClick={() => setTab('product')} className="primary-button">Create a product <ChevronDown size={16} /></button></div> : <form onSubmit={submit}><div className="form-grid">
-      {tab === 'product' ? <><label>Product name<input required value={form.name} onChange={(e) => update('name', e.target.value)} placeholder="e.g. Cold Brew" /></label><label>Category<input required value={form.category} onChange={(e) => update('category', e.target.value)} placeholder="e.g. Coffee" /></label><label className="full">Description<input value={form.description} onChange={(e) => update('description', e.target.value)} placeholder="Short tasting notes" /></label><label>Card color<select value={form.accent} onChange={(e) => update('accent', e.target.value)}>{['cyan', 'green', 'amber', 'orange', 'purple', 'pink'].map((color) => <option key={color}>{color}</option>)}</select></label></> : <><label>Product<select required value={form.productId || ''} onChange={(e) => update('productId', e.target.value)}><option value="" disabled>Select product</option>{products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label><label>Size label<input required value={form.sizeLabel || ''} onChange={(e) => update('sizeLabel', e.target.value)} placeholder="e.g. 20 oz" /></label><label>Retail price · single bottle<input required type="number" min="0" step="0.01" value={form.retailPrice ?? ''} onChange={(e) => update('retailPrice', e.target.value)} /></label><label>Wholesale price · full carton/box<input required type="number" min="0" step="0.01" value={form.wholesalePrice ?? ''} onChange={(e) => update('wholesalePrice', e.target.value)} /></label><label>Units per carton/box<input required type="number" min="1" value={form.packQuantity ?? 1} onChange={(e) => update('packQuantity', e.target.value)} /></label></>}
+      {tab === 'product' ? <><label>Product name<input required value={form.name} onChange={(e) => update('name', e.target.value)} placeholder="e.g. Cold Brew" /></label><label>Category<input required value={form.category} onChange={(e) => update('category', e.target.value)} placeholder="e.g. Coffee" /></label><label className="full">Description<input value={form.description} onChange={(e) => update('description', e.target.value)} placeholder="Short tasting notes" /></label><label>Card color<select value={form.accent} onChange={(e) => update('accent', e.target.value)}>{['cyan', 'green', 'amber', 'orange', 'purple', 'pink'].map((color) => <option key={color}>{color}</option>)}</select></label></> : <><label>Product<select required disabled={Boolean(variant?.id)} value={form.productId || ''} onChange={(e) => update('productId', e.target.value)}><option value="" disabled>Select product</option>{products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label><label>Size label<input required value={form.sizeLabel || ''} onChange={(e) => update('sizeLabel', e.target.value)} placeholder="e.g. 20 oz" /></label><label>Retail price · per item<input type="number" min="0" step="0.01" value={form.retailPrice ?? ''} onChange={(e) => update('retailPrice', e.target.value === '' ? null : e.target.value)} /></label><label>Wholesale price · stock entry<input type="number" min="0" step="0.01" value={form.wholesalePrice ?? ''} onChange={(e) => update('wholesalePrice', e.target.value === '' ? null : e.target.value)} /></label><label>Units per stock entry<input required type="number" min="1" value={form.packQuantity ?? 1} onChange={(e) => update('packQuantity', e.target.value)} /></label></>}
     </div><button className="primary-button submit" type="submit">{product || variant?.id ? 'Save changes' : 'Add to catalog'} <Sparkles size={15} /></button></form>}
   </div></div>
 }

@@ -1,7 +1,7 @@
 {
   "name": "Pour | Drink Price Lookup",
   "short_name": "Pour POS",
-  "description": "Fast Ghana cedi drink price lookup for retail bottles and wholesale cartons.",
+  "description": "Fast Ghana cedi drink price lookup for fridge retail items and wholesale stock.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
